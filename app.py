@@ -12,7 +12,7 @@ load_dotenv()
 env_api_key = os.getenv("GOOGLE_API_KEY")
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="AI Study Buddy", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="AutoStudy AI", page_icon="🧠", layout="wide")
 
 # --- CSS STYLING ---
 st.markdown("""
@@ -28,6 +28,35 @@ st.markdown("""
     h1, h2, h3 {
         color: #1e293b;
         font-weight: 700;
+    }
+    
+    /* Hero Section Styling */
+    .hero-title {
+        font-size: 3.5rem;
+        font-weight: 800;
+        text-align: center;
+        background: linear-gradient(90deg, #4F46E5, #9333EA);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0.5rem;
+    }
+    
+    .hero-subtitle {
+        font-size: 1.2rem;
+        text-align: center;
+        color: #64748b;
+        margin-bottom: 2rem;
+        font-weight: 400;
+    }
+
+    /* Floating Card Container Styling */
+    /* Target the vertical block wrapper that has a border */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: white;
+        border-radius: 20px;
+        border: 1px solid #e0e0e0;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01);
+        padding: 20px;
     }
 
     /* Index Card Styling for Summary */
@@ -150,8 +179,9 @@ def generate_study_material(text_content, api_key):
 
 # --- MAIN APP UI ---
 
-st.title("🧠 AI Study Companion")
-st.markdown("### Transform content into interactive study materials")
+# Hero Section
+st.markdown('<div class="hero-title">AutoStudy AI</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero-subtitle">Turn any video or text into flashcards & quizzes in seconds.</div>', unsafe_allow_html=True)
 
 # --- SESSION STATE INITIALIZATION ---
 if 'study_material' not in st.session_state:
@@ -180,20 +210,25 @@ if current_video_url != st.session_state['last_video_url']:
     st.session_state['last_video_url'] = current_video_url
 
 # --- WIDGETS ---
-tab1, tab2 = st.tabs(["📚 Text Input", "🎥 YouTube Video"])
+# Centered Card Container for Inputs
+col1, col2, col3 = st.columns([1, 2, 1])
 
-with tab1:
-    st.text_area(
-        "Paste notes or article text:", 
-        height=200, 
-        placeholder="Paste your study material here...",
-        key="study_material"
-    )
+with col2:
+    with st.container(border=True):
+        tab1, tab2 = st.tabs(["📚 Text Input", "🎥 YouTube Video"])
 
-with tab2:
-    st.text_input("Paste YouTube URL:", placeholder="https://www.youtube.com/watch?v=...", key="video_url")
-    if st.session_state.get("video_url"):
-        st.video(st.session_state["video_url"])
+        with tab1:
+            st.text_area(
+                "Paste notes or article text:", 
+                height=200, 
+                placeholder="Paste your study material here...",
+                key="study_material"
+            )
+
+        with tab2:
+            st.text_input("Paste YouTube URL:", placeholder="https://www.youtube.com/watch?v=...", key="video_url")
+            if st.session_state.get("video_url"):
+                st.video(st.session_state["video_url"])
 
 # --- AUTO-GENERATE LOGIC ---
 # Check if study material has changed (either from transcript fetch or manual edit)
@@ -287,10 +322,13 @@ if data:
             
             # Immediate feedback
             if user_answer:
-                if user_answer == q['correct_answer']:
+                # Check if the selected option starts with the correct letter (e.g., "A")
+                if user_answer.startswith(q['correct_answer']):
                     st.success(f"✅ Correct! The answer is **{user_answer}**.")
                 else:
-                    st.error(f"❌ Incorrect. The correct answer is **{q['correct_answer']}**.")
+                    # Find the full text of the correct answer
+                    correct_option_text = next((opt for opt in q['options'] if opt.startswith(q['correct_answer'])), q['correct_answer'])
+                    st.error(f"❌ Incorrect. The correct answer is **{correct_option_text}**.")
         
         # Margin between cards
         st.markdown("<br>", unsafe_allow_html=True)
