@@ -3,11 +3,15 @@ import google.generativeai as genai
 import PyPDF2
 import json
 import os
+import gspread
+from datetime import datetime
 from dotenv import load_dotenv
 
 # --- LOAD ENVIRONMENT VARIABLES ---
 load_dotenv()
-env_api_key = os.getenv("GOOGLE_API_KEY")
+
+# --- CONSTANTS ---
+LOCAL_GSPREAD_KEY_FILE = "lfpdf-479215-51af785aa8fa.json"
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="AutoStudy AI", page_icon="🧠", layout="wide")
@@ -146,9 +150,9 @@ st.markdown("""
         }
     }
 
-    /* --- MAGIC WAND BUTTON STYLING (ICON ONLY) --- */
-    /* Target buttons that contain the specific icon-only logic */
-    div.stButton > button {
+    /* --- MAGIC WAND BUTTON STYLING (SPECIFIC TARGETING) --- */
+    /* Target buttons that contain the specific icon-only logic via aria-label */
+    div.stButton > button[aria-label="Generate"] {
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -156,10 +160,11 @@ st.markdown("""
         height: 100%;
         min-height: 45px; /* Match input height roughly */
         padding: 0;
+        color: transparent !important; /* Hide text */
     }
 
     /* Inject SVG icon using mask-image for currentColor support */
-    div.stButton > button::before {
+    div.stButton > button[aria-label="Generate"]::before {
         content: "";
         width: 24px;
         height: 24px;
@@ -171,17 +176,161 @@ st.markdown("""
         mask-repeat: no-repeat;
         -webkit-mask-repeat: no-repeat;
     }
+
+    /* --- CUSTOM FEEDBACK SUCCESS BOX --- */
+    .success-box {
+        background-color: #dcfce7; /* Green-100 */
+        border: 1px solid #86efac; /* Green-300 */
+        color: #166534; /* Green-800 */
+        padding: 16px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        position: relative;
+        font-weight: 500;
+    }
+
+    /* --- POSITIONING THE DISMISS BUTTON (SUCCESS) --- */
+    /* Target the button with label '✖' (Heavy Multiplication X) */
+    button[aria-label="✖"] {
+        position: absolute !important;
+        top: -55px !important; /* Pull it up into the box (adjust based on box height) */
+        right: 10px !important;
+        background: transparent !important;
+        border: none !important;
+        color: #166534 !important;
+        font-size: 1.2rem !important;
+        z-index: 100;
+    }
+    button[aria-label="✖"]:hover {
+        color: #b91c1c !important;
+        background-color: rgba(255,255,255,0.5) !important;
+    }
+
+    /* --- POSITIONING THE CARD CLOSE BUTTON --- */
+    /* Target the button with label '✕' (Multiplication X) */
+    button[aria-label="✕"] {
+        border: none !important;
+        background: transparent !important;
+        color: #64748b !important;
+        font-size: 1.2rem !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        display: flex;
+        justify-content: flex-end;
+    }
+    button[aria-label="✕"]:hover {
+        color: #ef4444 !important;
+        background: transparent !important;
+    }
+    
+    /* Force right alignment for the card close button container */
+    div[data-testid="stHorizontalBlock"] > div:nth-child(2) {
+        display: flex;
+        justify-content: flex-end;
+    }
+
 </style>
 """, unsafe_allow_html=True)
 
 # --- API KEY LOGIC ---
-if env_api_key:
-    api_key = env_api_key
-else:
+api_key = None
+# Try to get API key from secrets first
+try:
+    if "GOOGLE_API_KEY" in st.secrets:
+        api_key = st.secrets["GOOGLE_API_KEY"]
+except Exception:
+    pass
+
+# If not in secrets, try environment variable (loaded by dotenv)
+if not api_key:
+    api_key = os.getenv("GOOGLE_API_KEY")
+
+if not api_key:
     st.sidebar.header("Settings")
     api_key = st.sidebar.text_input("Enter Google Gemini API Key", type="password")
 
 # --- HELPER FUNCTIONS ---
+
+@st.cache_resource
+def get_gspread_client():
+    """
+    Initializes the Gspread client with conditional authentication.
+    Checks Streamlit secrets first, then local file.
+    """
+    try:
+        # 1. Check Cloud/Secrets First
+        try:
+            if "GSPREAD_AUTH" in st.secrets:
+                return gspread.service_account_from_dict(st.secrets["GSPREAD_AUTH"])
+        except Exception:
+            pass
+        
+        # 2. Check Local File Second
+        if os.path.exists(LOCAL_GSPREAD_KEY_FILE):
+            return gspread.service_account(filename=LOCAL_GSPREAD_KEY_FILE)
+        
+        else:
+            st.warning("Google Sheets authentication not found (Secrets or Local File). Feedback will not be saved.")
+            return None
+    except Exception as e:
+        st.error(f"Authentication Error: {e}")
+        return None
+
+def submit_feedback(rating, comment):
+    """
+    Submits feedback to Google Sheets.
+    """
+    client = get_gspread_client()
+    if not client:
+        return
+
+    try:
+        # Open the spreadsheet
+        sheet_name = None
+        
+        # 1. Try Secrets
+        try:
+            sheet_name = st.secrets.get("SHEET_NAME")
+        except Exception:
+            pass
+        
+        # 2. Try Environment Variable if not in secrets
+        if not sheet_name:
+            sheet_name = os.getenv("SHEET_NAME")
+            
+        # 3. Fallback default
+        if not sheet_name:
+            sheet_name = "LearnFromPDF_Feedback"
+        
+        # Open the sheet - handle potential errors if sheet doesn't exist
+        try:
+            sh = client.open(sheet_name)
+        except gspread.SpreadsheetNotFound:
+             # Create if it doesn't exist (optional, but good for first run)
+             try:
+                sh = client.create(sheet_name)
+                sh.share(client.auth.service_account_email, perm_type='user', role='owner')
+             except:
+                 st.error(f"Spreadsheet '{sheet_name}' not found and could not be created.")
+                 return
+
+        worksheet = sh.get_worksheet(0)
+
+        # Append row
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Use a simple session ID or generate one if not present
+        if 'session_id' not in st.session_state:
+            import uuid
+            st.session_state['session_id'] = str(uuid.uuid4())
+        
+        session_id = st.session_state['session_id']
+        
+        worksheet.append_row([timestamp, rating, comment, session_id])
+        return True
+        
+    except Exception as e:
+        st.error(f"Error saving feedback: {e}")
+        return False
 
 def extract_text_from_pdf(pdf_file):
     """
@@ -257,6 +406,8 @@ def process_generation(uploaded_file, status_container=None):
             data = generate_study_material(text_to_process, api_key)
             if data:
                 st.session_state['generated_data'] = data
+                st.session_state['show_feedback'] = True # Enable feedback on success
+                st.session_state['feedback_submitted'] = False # Reset submission state
                 st.rerun() # Rerun to display results
 
 # --- MAIN APP UI ---
@@ -270,6 +421,10 @@ if 'study_material' not in st.session_state:
     st.session_state['study_material'] = ""
 if 'generated_data' not in st.session_state:
     st.session_state['generated_data'] = None
+if 'show_feedback' not in st.session_state:
+    st.session_state['show_feedback'] = False
+if 'feedback_submitted' not in st.session_state:
+    st.session_state['feedback_submitted'] = False
 
 # --- WIDGETS ---
 # Centered Card Container for Inputs
@@ -290,13 +445,9 @@ with col2:
         
         with u_col2:
             # Spacer to align button with the file uploader box
-            # File uploader is taller than text input, so we might need less or more spacing.
-            # Usually file uploader is quite tall. Let's try centering vertically via columns if possible, 
-            # but standard columns align top. 
-            # A spacer of ~28px often works for file uploaders which have a label (even if collapsed, the box is tall).
-            # Let's try a small spacer.
             st.markdown("<div style='height: 5px'></div>", unsafe_allow_html=True) 
-            generate_clicked = st.button(" ", key="btn_pdf_gen", type="primary", use_container_width=True)
+            # Use label="Generate" to match CSS selector, but CSS will hide text and show icon
+            generate_clicked = st.button("Generate", key="btn_pdf_gen", type="primary", use_container_width=True)
 
         # Status Container
         status_container = st.container()
@@ -391,3 +542,67 @@ if data:
         
         # Margin between cards
         st.markdown("<br>", unsafe_allow_html=True)
+
+# --- FEEDBACK SECTION ---
+# Only render if feedback is active
+if st.session_state.get('show_feedback'):
+    
+    # Case 1: Feedback already submitted -> Show Custom Success Message
+    if st.session_state.get('feedback_submitted'):
+        st.markdown("---")
+        
+        # Custom HTML Success Box
+        st.markdown(
+            """
+            <div class="success-box">
+                <span>Thank you for your feedback!</span>
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
+
+    # Case 2: Feedback NOT submitted -> Show Form
+    else:
+        st.markdown("---")
+        
+        # Placeholder for smooth loading/hiding
+        feedback_placeholder = st.empty()
+        
+        with feedback_placeholder.container():
+            with st.container(border=True):
+                # Header and Close Button
+                # Use a very small second column to force right alignment
+                col_title, col_close = st.columns([1, 0.05])
+                with col_title:
+                    st.subheader("⭐ Share Your Feedback")
+                with col_close:
+                    # Use standard '✕' (Multiplication X) for this button
+                    if st.button("✕", key="close_feedback"):
+                        st.session_state['show_feedback'] = False
+                        st.rerun()
+                
+                # Feedback Form
+                with st.form("feedback_form"):
+                    rating_options = ['5 stars ⭐⭐⭐⭐⭐', '4 stars ⭐⭐⭐⭐', '3 stars ⭐⭐⭐', '2 stars ⭐⭐', '1 star ⭐']
+                    rating_selection = st.selectbox("Rate your experience", options=rating_options)
+                    
+                    comment = st.text_area("Additional comments (optional):", height=100)
+                    
+                    # Standard submit button (no icon styling)
+                    submitted = st.form_submit_button("Submit Feedback", type="primary")
+                    
+                    if submitted:
+                        # Extract numeric rating
+                        rating_value = int(rating_selection.split(" ")[0])
+                        
+                        # Hide the form immediately by clearing the placeholder
+                        feedback_placeholder.empty()
+                        
+                        # Show spinner in the now-empty placeholder
+                        with feedback_placeholder.container():
+                            with st.spinner("Saving your feedback..."):
+                                success = submit_feedback(rating_value, comment)
+                        
+                        if success:
+                            st.session_state['feedback_submitted'] = True
+                            st.rerun()
