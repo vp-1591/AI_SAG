@@ -1,5 +1,7 @@
 # Learn From PDF - AI Study Kit
 
+> ⚠️ **Warning:** The current version is being developed on the `proto-1` branch.
+
 **Learn From PDF** is an AI-powered study tool built with Streamlit. It converts PDF documents into summaries, flashcards, and quizzes.
 
 > **Note:** This is an MVP (Minimum Viable Product) version currently under development. There is a lot of room for improvement, and I appreciate any feedback or suggestions!
