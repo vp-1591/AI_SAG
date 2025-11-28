@@ -15,7 +15,7 @@ load_dotenv()
 LOCAL_GSPREAD_KEY_FILE = "lfpdf-479215-51af785aa8fa.json"
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="AutoStudy AI", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Learn From PDF", page_icon="icon.svg", layout="wide")
 
 # --- HIDE STREAMLIT STYLE ---
 hide_st_style = """
