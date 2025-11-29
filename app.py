@@ -185,7 +185,7 @@ def generate_study_material(text_content, api_key):
         [
             {{
                 "title": "Concept Title",
-                "summary": "A 1-3 sentence summary of the concept."
+                "summary": "A 1-3 sentence summary of the concept with example."
             }},
             ...
         ]
